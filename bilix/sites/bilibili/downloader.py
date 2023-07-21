@@ -1,6 +1,6 @@
 import asyncio
 import functools
-import re
+import re,os,datetime
 from pathlib import Path
 from typing import Union, Sequence, Tuple, List
 import aiofiles
@@ -229,7 +229,7 @@ class DownloaderBilibili(BaseDownloaderPart):
 
     async def get_up(
             self, url_or_mid: str, path=Path('.'), num=10, order='pubdate', keyword='', quality=0,
-            series=True, image=False, subtitle=False, dm=False, only_audio=False, codec='', ):
+            series=True, image=False, subtitle=False, dm=False, only_audio=False, codec='',beginday=0, ):
         """
         下载up主视频
         :cli: short: up
@@ -248,9 +248,9 @@ class DownloaderBilibili(BaseDownloaderPart):
         :return:
         """
         ps = 30
-        up_name, total_size, bv_ids = await api.get_up_info(self.client, url_or_mid, 1, ps, order, keyword)
+        up_name, up_id,total_size, bv_ids = await api.get_up_info(self.client, url_or_mid, 1, ps, order, beginday,keyword)
         if self.hierarchy:
-            path /= legal_title(f"【up】{up_name}")
+            path /= legal_title(f"【up】{up_name}_{up_id}")
             path.mkdir(parents=True, exist_ok=True)
         num = min(total_size, num)
         page_nums = num // ps + min(1, num % ps)
@@ -260,17 +260,22 @@ class DownloaderBilibili(BaseDownloaderPart):
                 p_num = num - (page_nums - 1) * ps
             else:
                 p_num = ps
+            if beginday>0:
+                path = os.path.join(path,datetime.fromtimestamp(beginday).strftime("%Y-%m-%d"))
+                if not os.path.exists(path):
+                    os.makedirs(path)
             cors.append(self._get_up_by_page(
                 url_or_mid, path, i + 1, p_num, order, keyword, quality, series, image=image,
-                subtitle=subtitle, dm=dm, only_audio=only_audio, codec=codec))
+                subtitle=subtitle, dm=dm, only_audio=only_audio, codec=codec,beginday=beginday))
         await asyncio.gather(*cors)
 
     async def _get_up_by_page(self, url_or_mid, path: Path, pn=1, num=30, order='pubdate', keyword='', quality=0,
-                              series=True, image=False, subtitle=False, dm=False, only_audio=False, codec='', ):
+                              series=True, image=False, subtitle=False, dm=False, only_audio=False, codec='',beginday=0 ):
         ps = 30
         num = min(ps, num)
-        _, _, bvids = await api.get_up_info(self.client, url_or_mid, pn, ps, order, keyword)
-        bvids = bvids[:num]
+        bvids = []
+        _, _,_, bv_ids = await api.get_up_info(self.client, url_or_mid, pn, ps, order, beginday,keyword)
+        bvids = bv_ids[:num]
         func = self.get_series if series else self.get_video
         # noinspection PyArgumentList
         await asyncio.gather(
@@ -312,7 +317,7 @@ class DownloaderBilibili(BaseDownloaderPart):
         await asyncio.gather(*cors)
 
     async def get_video(self, url: str, path=Path('.'),
-                        quality: Union[str, int] = 0, image=False, subtitle=False, dm=False, only_audio=False,
+                        quality: Union[str, int] = 0, image=False, subtitle=False, dm=False, only_audio=False, begday:str = '',
                         codec: str = '', time_range: Tuple[int, int] = None, video_info: api.VideoInfo = None):
         """
         下载单个视频
@@ -417,7 +422,9 @@ class DownloaderBilibili(BaseDownloaderPart):
             # additional task
             add_cors = []
             if image or subtitle or dm:
-                extra_path = path / "extra" if self.hierarchy else path
+                # subtitle 不獨立生成目錄
+                # extra_path = path / "extra" if self.hierarchy else path
+                extra_path = path
                 extra_path.mkdir(exist_ok=True)
                 if image:
                     add_cors.append(self.get_static(video_info.img_url, path=extra_path / base_name))

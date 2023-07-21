@@ -23,7 +23,7 @@ class InformerBilibili(DownloaderBilibili):
         await self.parse_url(key)(self, key)
 
     async def info_up(self, url: str):
-        up_name, total_size, bvids = await api.get_up_info(self.client, url)
+        up_name, up_id,total_size, bv_ids = await api.get_up_info(self.client, url)
         rprint(up_name)
 
     async def info_favour(self, url: str):
@@ -45,6 +45,9 @@ class InformerBilibili(DownloaderBilibili):
                 m.size = int(res.headers['Content-Range'].split('/')[-1])
 
         dash = video_info.dash
+        cors = []
+        if dash is None:
+            return logger.warning(f'dash is None')
         cors = [ensure_size(m) for m in dash.videos] + [ensure_size(m) for m in dash.audios]
         await asyncio.gather(*cors)
 

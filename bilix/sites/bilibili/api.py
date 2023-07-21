@@ -62,7 +62,10 @@ async def get_list_info(client: httpx.AsyncClient, url_or_sid: str, ):
         req_retry(client, 'https://api.bilibili.com/x/series/archives', params=params),
         req_retry(client, f'https://api.bilibili.com/x/space/acc/info?mid={mid}'))
     list_info, up_info = json.loads(list_res.text), json.loads(up_res.text)
-    list_name,up_name = meta['data']['meta']['name'],up_info['data']['name']
+    up_name = None
+    if 'data' in up_info.keys():
+        up_name = up_info['data']['name']
+    list_name = meta['data']['meta']['name']
     bvids = [i['bvid'] for i in list_info['data']['archives']]
     return list_name, up_name, bvids
 
@@ -165,7 +168,7 @@ async def _add_sign(client: httpx.AsyncClient, params: dict):
 
 
 @raise_api_error
-async def get_up_info(client: httpx.AsyncClient, url_or_mid: str, pn=1, ps=30, order="pubdate", keyword=""):
+async def get_up_info(client: httpx.AsyncClient, url_or_mid: str, pn=1, ps=30, order="pubdate", beginday=0, keyword=""):
     """
     获取up主信息
 
@@ -188,21 +191,22 @@ async def get_up_info(client: httpx.AsyncClient, url_or_mid: str, pn=1, ps=30, o
     res = await req_retry(client, "https://api.bilibili.com/x/space/wbi/arc/search", params=params)
     info = json.loads(res.text)
     up_name = info["data"]["list"]["vlist"][0]["author"]
+    up_id = info["data"]["list"]["vlist"][0]["mid"]
     total_size = info["data"]["page"]["count"]
-    bv_ids = [i["bvid"] for i in info["data"]["list"]["vlist"]]
-    return up_name, total_size, bv_ids
+    bv_ids = [i["bvid"] for i in info["data"]["list"]["vlist"] if i['created'] > beginday]
+    return up_name, up_id,total_size, bv_ids
 
 
 class Media(BaseModel):
-    base_url: str
+    base_url: Optional[str] 
     backup_url: Optional[List[str]]
     size: int = None
     width: int = None
     height: int = None
-    suffix: Optional[str] = None
-    quality: Optional[str] = None
-    codec: Optional[str] = None
-    segment_base: Optional[dict] = None
+    suffix: str = None
+    quality: str = None
+    codec: str = None
+    segment_base: dict = None
 
     @property
     def urls(self):
@@ -311,6 +315,16 @@ class Page(BaseModel):
     p_name: str
     p_url: str
 
+class UpInfo(BaseModel):
+    name:str
+    mid:str
+    face:Optional[str]
+    sign:Optional[str]
+    fans:int
+    friend:int
+    attention:int
+    
+    
 
 class VideoInfo(BaseModel):
     title: str
@@ -321,6 +335,7 @@ class VideoInfo(BaseModel):
     pages: List[Page]  # [[p_name, p_url], ...]
     img_url: str
     status: Status
+    up_info:Optional[UpInfo] = None
     bvid: Optional[str] = None
     dash: Optional[Dash] = None
     other: Optional[List[Media]] = None  # durl resource: flv, mp4.
@@ -335,6 +350,7 @@ class VideoInfo(BaseModel):
             raise APIResourceError("视频已失效", url)  # 啊叻？视频不见了？在分区下载的时候可能产生
         # extract meta
         pages = []
+        up_info = None
         h1_title = legal_title(re.search('<h1[^>]*title="([^"]*)"', html).groups()[0])
         if 'videoData' in init_info:  # bv视频
             status = Status(**init_info['videoData']['stat'])
@@ -344,6 +360,7 @@ class VideoInfo(BaseModel):
             p = int(p) - 1
             title = legal_title(init_info['videoData']['title'])
             base_url = url.split('?')[0]
+            up_info = UpInfo(**init_info['upData']) 
             for idx, i in enumerate(init_info['videoData']['pages']):
                 p_url = f"{base_url}?p={idx + 1}"
                 p_name = f"P{idx + 1}-{i['part']}" if len(init_info['videoData']['pages']) > 1 else ''
@@ -388,7 +405,7 @@ class VideoInfo(BaseModel):
         if not img_url.startswith('http'):  # https://github.com/HFrost0/bilix/issues/52 just for some video
             img_url = 'http:' + img_url.split('@')[0]
         # construct data
-        video_info = VideoInfo(title=title, h1_title=h1_title, aid=aid, cid=cid, status=status,
+        video_info = VideoInfo(title=title, h1_title=h1_title, aid=aid, cid=cid,up_info=up_info, status=status,
                                p=p, pages=pages, img_url=img_url, bvid=bvid, dash=dash, other=other)
         return video_info
 
